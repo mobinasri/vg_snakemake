@@ -53,41 +53,88 @@ else:
             vg call -t {threads} -k {input.pack} -Az $RPATHS -s {wildcards.sample} -c {wildcards.minlen} {input.gbz} | bgzip > {output}
             """
 
-rule dv_make_examples:
-    input:
-        ref=getref(),
-        ref_idx=getrefidx(),
-        bam="results/{sample}/{sample}.{graph}.{surj}.bam",
-        bai="results/{sample}/{sample}.{graph}.{surj}.bam.bai"
-    output: temp("results/{sample}/{sample}.{graph}.{surj}.make_examples.tfrecord.tar.gz")
-    params:
-        label="{sample}.{graph}.{surj}",
-        dvdir="dv_{sample}_{graph}_{surj}"
-    threads: 8
-    priority: 6
-    container: docker_imgs['deepvariant']
-    benchmark: 'benchmark/{sample}.{graph}.{surj}.dv_make_examples.benchmark.tsv'
-    log: 'logs/{sample}.{graph}.{surj}.dv_make_examples.log'
-    shell:
-        """
-        mkdir -p {params.dvdir}
+print(f"DEBUG pangenome_aware_deepvariant={config['pangenome_aware_deepvariant']} (type={type(config['pangenome_aware_deepvariant'])})")
+if config['pangenome_aware_deepvariant']:
+    rule dv_make_examples:
+        input:
+            ref=getref(),
+            ref_idx=getrefidx(),
+            bam="results/{sample}/{sample}.{graph}.{surj}.bam",
+            bai="results/{sample}/{sample}.{graph}.{surj}.bam.bai",
+            gbz="results/{sample}/{graph}.sample_pg.{sample}.gbz"
+        output: temp("results/{sample}/{sample}.{graph}.{surj}.make_examples.tfrecord.tar.gz")
+        params:
+            label="{sample}.{graph}.{surj}",
+            dvdir="dv_{sample}_{graph}_{surj}",
+            gbz_memory=get_gbz_mem_bytes()
+        threads: 8
+        priority: 6
+        container: docker_imgs['deepvariant']
+        benchmark: 'benchmark/{sample}.{graph}.{surj}.dv_make_examples.benchmark.tsv'
+        log: 'logs/{sample}.{graph}.{surj}.dv_make_examples.log'
+        shell:
+            """
+            mkdir -p {params.dvdir}
 
-        seq 0 $(({threads}-1)) | \
-        parallel -q --halt 2 --line-buffer /opt/deepvariant/bin/make_examples \
-        --mode calling \
-        --ref {input.ref} \
-        --reads {input.bam} \
-        --examples ./{params.dvdir}/make_examples.{params.label}.tfrecord@{threads}.gz \
-        --sample_name {wildcards.sample} \
-        --gvcf ./{params.dvdir}/gvcf.{params.label}.tfrecord@{threads}.gz \
-        --channels insert_size \
-        --min_mapping_quality 1 \
-        --keep_legacy_allele_counter_behavior \
-        --task {{}} 2> {log}
+            seq 0 $(({threads}-1)) | \
+            parallel -q --halt 2 --line-buffer /opt/deepvariant/bin/make_examples_pangenome_aware_dv \
+            --mode calling \
+            --ref {input.ref} \
+            --reads {input.bam} \
+            --pangenome {input.gbz} \
+            --examples ./{params.dvdir}/make_examples.{params.label}.tfrecord@{threads}.gz \
+            --sample_name_reads {wildcards.sample} \
+            --gvcf ./{params.dvdir}/gvcf.{params.label}.tfrecord@{threads}.gz \
+            --channel_list BASE_CHANNELS,insert_size \
+            --min_mapping_quality 0 \
+            --keep_legacy_allele_counter_behavior \
+            --keep_only_window_spanning_haplotypes \
+            --keep_supplementary_alignments \
+            --sort_by_haplotypes \
+            --normalize_reads \
+            --trim_reads_for_pileup \
+            --shm_buffer_size {params.gbz_memory} \
+            --task {{}} 2> {log}
         
-        tar -czf '{output}' {params.dvdir}
-        rm -rf {params.dvdir}
-        """
+            tar -czf '{output}' {params.dvdir}
+            rm -rf {params.dvdir}
+            """
+else:
+    rule dv_make_examples:
+        input:
+            ref=getref(),
+            ref_idx=getrefidx(),
+            bam="results/{sample}/{sample}.{graph}.{surj}.bam",
+            bai="results/{sample}/{sample}.{graph}.{surj}.bam.bai"
+        output: temp("results/{sample}/{sample}.{graph}.{surj}.make_examples.tfrecord.tar.gz")
+        params:
+            label="{sample}.{graph}.{surj}",
+            dvdir="dv_{sample}_{graph}_{surj}"
+        threads: 8
+        priority: 6
+        container: docker_imgs['deepvariant']
+        benchmark: 'benchmark/{sample}.{graph}.{surj}.dv_make_examples.benchmark.tsv'
+        log: 'logs/{sample}.{graph}.{surj}.dv_make_examples.log'
+        shell:
+            """
+            mkdir -p {params.dvdir}
+
+            seq 0 $(({threads}-1)) | \
+            parallel -q --halt 2 --line-buffer /opt/deepvariant/bin/make_examples \
+            --mode calling \
+            --ref {input.ref} \
+            --reads {input.bam} \
+            --examples ./{params.dvdir}/make_examples.{params.label}.tfrecord@{threads}.gz \
+            --sample_name {wildcards.sample} \
+            --gvcf ./{params.dvdir}/gvcf.{params.label}.tfrecord@{threads}.gz \
+            --channels insert_size \
+            --min_mapping_quality 1 \
+            --keep_legacy_allele_counter_behavior \
+            --task {{}} 2> {log}
+        
+            tar -czf '{output}' {params.dvdir}
+            rm -rf {params.dvdir}
+            """
 
 if config['use_gpu']:
     rule dv_call_variants_gpu:
@@ -103,7 +150,8 @@ if config['use_gpu']:
         params:
             call_tf="temp.call_variants_output.{sample}.{surj}.tfrecord.gz",
             label="{sample}.{graph}.{surj}",
-            dvdir="dv_{sample}_{graph}_{surj}"
+            dvdir="dv_{sample}_{graph}_{surj}",
+            checkpoint=getcheckpoint()
         container: docker_imgs['deepvariant_gpu']
         threads: 8
         priority: 7
@@ -116,7 +164,7 @@ if config['use_gpu']:
             /opt/deepvariant/bin/call_variants \
             --outfile {params.call_tf} \
             --examples "{params.dvdir}/make_examples.{params.label}.tfrecord@{threads}.gz" \
-            --checkpoint /opt/models/wgs/model.ckpt 2> {log}
+            --checkpoint {params.checkpoint} 2> {log}
 
             /opt/deepvariant/bin/postprocess_variants \
             --ref {input.ref} \
@@ -141,7 +189,8 @@ else:
         params:
             call_tf="temp.call_variants_output.{sample}.{surj}.tfrecord.gz",
             label="{sample}.{graph}.{surj}",
-            dvdir="dv_{sample}_{graph}_{surj}"
+            dvdir="dv_{sample}_{graph}_{surj}",
+            checkpoint=getcheckpoint()
         container: docker_imgs['deepvariant']
         threads: 8
         priority: 7
@@ -154,7 +203,7 @@ else:
             /opt/deepvariant/bin/call_variants \
             --outfile {params.call_tf} \
             --examples "{params.dvdir}/make_examples.{params.label}.tfrecord@{threads}.gz" \
-            --checkpoint /opt/models/wgs/model.ckpt 2> {log}
+            --checkpoint {params.checkpoint} 2> {log}
 
             /opt/deepvariant/bin/postprocess_variants \
             --ref {input.ref} \

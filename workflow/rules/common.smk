@@ -1,5 +1,8 @@
 import pandas as pd
 
+if 'pangenome_aware_deepvariant' not in config:
+    config['pangenome_aware_deepvariant'] = False
+
 if 'sample' in config and config['sample'] is None:
     config['sample'] = []
 
@@ -110,6 +113,18 @@ def getrefdict():
     else:
         return "results/pg/{graph}.ref.dict"
 
+def getcheckpoint():
+    if config['pangenome_aware_deepvariant']:
+        return "/opt/models/pangenome_aware_deepvariant/wgs" 
+    else:
+        return "/opt/models/wgs/model.ckpt"
+
+def get_gbz_mem_bytes():
+    if 'gbz_mem_bytes' in config:
+        return config['gbz_mem_bytes']
+    else:
+        return 0
+
 if 'rm_all_on_success' in config and config['rm_all_on_success']:
     def tempCond(filen):
         return (temp(filen))
@@ -125,8 +140,8 @@ docker_imgs['vg'] = "docker://quay.io/vgteam/vg:v1.59.0"
 docker_imgs['vgwork'] = 'docker://quay.io/jmonlong/vg-work:1.59.0_v1'
 docker_imgs['gatk_bedtools'] = "docker://quay.io/jmonlong/gatk-bedtools:3.8.1_2.21.0"
 docker_imgs['abra'] = 'docker://quay.io/adamnovak/dceoy-abra2@sha256:43d09d1c10220cfeab09e2763c2c5257884fa4457bcaa224f4e3796a28a24bba'
-docker_imgs['deepvariant'] = "docker://google/deepvariant:1.5.0"
-docker_imgs['deepvariant_gpu'] = "docker://google/deepvariant:1.5.0-gpu"
+docker_imgs['deepvariant'] = "docker://google/deepvariant:pangenome_aware_deepvariant-1.10.0"
+docker_imgs['deepvariant_gpu'] = "docker://google/deepvariant:pangenome_aware_deepvariant-1.10.0-gpu"
 docker_imgs['manta'] = "docker://quay.io/jmonlong/manta:main"
 docker_imgs['mosdepth'] = "docker://quay.io/biocontainers/mosdepth:0.3.6--hd299d5a_0"
 
